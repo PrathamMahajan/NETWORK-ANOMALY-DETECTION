@@ -53,7 +53,7 @@ def capture_flows(interface='Wi-Fi', display=True, max_packets=None, on_new_flow
 
                     # Call the callback for real-time prediction
                     if on_new_flow is not None:
-                        print(f"[DEBUG] Calling on_new_flow for {flow_key}")
+                        #print(f"[DEBUG] Calling on_new_flow for {flow_key}")
                         on_new_flow(flow_key, flows[flow_key])
 
                     if display:
