@@ -77,9 +77,5 @@ A deep learning-based system for real-time network anomaly detection using flow-
 
 - Run unit tests in the `Test/` folder to validate prediction and utility functions:
   ```sh
-  python -m unittest discover Test
+  python Test.py
   ```
-
-## License
-
-MIT License (add or update as
