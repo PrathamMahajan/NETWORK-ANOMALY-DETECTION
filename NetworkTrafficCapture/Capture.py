@@ -22,6 +22,9 @@ def capture_flows(interface='Wi-Fi', display=True, max_packets=None, on_new_flow
                     now = time.time()
 
                     flow_key = (src_ip, dst_ip, src_port, dst_port, protocol)
+                    rev_flow_key = (dst_ip, src_ip, dst_port, src_port, protocol)  # Reverse flow
+
+                    # Initialize forward flow if not present
                     if flow_key not in flows:
                         flows[flow_key] = {
                             'SourceIP': src_ip,
@@ -30,15 +33,37 @@ def capture_flows(interface='Wi-Fi', display=True, max_packets=None, on_new_flow
                             'DestinationPort': int(dst_port),
                             'Protocol': protocol,
                             'BytesSent': 0,
-                            'BytesReceived': 0,      
+                            'BytesReceived': 0,
                             'PacketsSent': 0,
-                            'PacketsReceived': 0,  
+                            'PacketsReceived': 0,
                             'StartTime': now,
                             'EndTime': now
                         }
+                    # Initialize reverse flow if not present
+                    if rev_flow_key not in flows:
+                        flows[rev_flow_key] = {
+                            'SourceIP': dst_ip,
+                            'DestinationIP': src_ip,
+                            'SourcePort': int(dst_port),
+                            'DestinationPort': int(src_port),
+                            'Protocol': protocol,
+                            'BytesSent': 0,
+                            'BytesReceived': 0,
+                            'PacketsSent': 0,
+                            'PacketsReceived': 0,
+                            'StartTime': now,
+                            'EndTime': now
+                        }
+
+                    # Update forward flow (sent)
                     flows[flow_key]['BytesSent'] += length
                     flows[flow_key]['PacketsSent'] += 1
                     flows[flow_key]['EndTime'] = now
+
+                    # Update reverse flow (received)
+                    flows[rev_flow_key]['BytesReceived'] += length
+                    flows[rev_flow_key]['PacketsReceived'] += 1
+                    flows[rev_flow_key]['EndTime'] = now
 
                     if on_new_flow is not None:
                         on_new_flow(flow_key, flows[flow_key])
