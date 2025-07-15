@@ -1,10 +1,11 @@
-from NetworkTrafficCapture.Capture import capture_flows
-from Model.predict import predict
+import sys
+import os
 import struct
 import socket
-
-MODEL_PATH = 'Model/saved_models/Trained_Model.pth'
-THRESHOLD = 0.00005  # Adjust as needed
+import psutil
+import requests # type: ignore
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+from NetworkTrafficCapture.Capture import capture_flows
 
 def ip_to_int(ip):
     try:
@@ -12,25 +13,66 @@ def ip_to_int(ip):
     except Exception:
         return 0.0
 
+def get_process_name(src_ip, src_port):
+    try:
+        for conn in psutil.net_connections(kind='inet'):
+            laddr = conn.laddr if conn.laddr else None
+            if laddr and laddr.ip == src_ip and laddr.port == src_port:
+                try:
+                    return psutil.Process(conn.pid).name()
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    return "Unknown"
+    except Exception as e:
+        print(f"[ERROR] Getting process name failed: {e}")
+    return "Unknown"
+
+def get_process_user(src_ip, src_port):
+    try:
+        for conn in psutil.net_connections(kind='inet'):
+            laddr = conn.laddr if conn.laddr else None
+            if laddr and laddr.ip == src_ip and laddr.port == src_port:
+                try:
+                    return psutil.Process(conn.pid).username()
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    return "Unknown"
+    except Exception as e:
+        print(f"[ERROR] Getting process user failed: {e}")
+    return "Unknown"
+
 def on_flow_update(flow_key, flow):
-    # Convert flow dict to feature vector in required order
-    input_features = [
-        ip_to_int(flow.get('SourceIP', '0.0.0.0')),
-        ip_to_int(flow.get('DestinationIP', '0.0.0.0')),
-        float(flow.get('SourcePort', 0)),
-        float(flow.get('DestinationPort', 0)),
-        1.0 if flow.get('Protocol', '').upper() == 'TCP' else 2.0 if flow.get('Protocol', '').upper() == 'UDP' else 0.0,
-        float(flow.get('BytesSent', 0)),
-        float(flow.get('BytesReceived', 0)),
-        float(flow.get('PacketsSent', 0)),
-        float(flow.get('PacketsReceived', 0)),
-        float(flow.get('EndTime', 0)) - float(flow.get('StartTime', 0)),
-    ]
-    is_anomaly, loss = predict(input_features, MODEL_PATH, THRESHOLD)
-    print(f"[REAL-TIME] Flow {flow_key} | Anomaly={is_anomaly} | Loss={loss} | Features={input_features}")
+    # Extract values first
+    src_ip = flow.get('SourceIP', '0.0.0.0')
+    dest_ip = flow.get('DestinationIP', '0.0.0.0')
+    src_port = int(flow.get('SourcePort', 0))
+    dest_port = int(flow.get('DestinationPort', 0))
+    protocol = flow.get('Protocol', '').upper()
+    bytes_sent = int(flow.get('BytesSent', 0))
+    bytes_received = int(flow.get('BytesReceived', 0))
+    packets_sent = int(flow.get('PacketsSent', 0))
+    packets_received = int(flow.get('PacketsReceived', 0))
+    duration = float(flow.get('EndTime', 0)) - float(flow.get('StartTime', 0))
+    process_name = get_process_name(src_ip, src_port)
+    process_user = get_process_user(src_ip, src_port)
+
+    # Only print if process_name is not "Unknown"
+    if process_name != "Unknown":
+        input_features = [
+            src_ip,
+            dest_ip,
+            src_port,
+            dest_port,
+            protocol,
+            bytes_sent,
+            bytes_received,
+            packets_sent,
+            packets_received,
+            duration,
+            process_name,
+            process_user
+        ]
+        print(f"[REAL-TIME] Features={input_features}")
 
 def main():
-    #print("Starting real-time anomaly detection...")
     capture_flows(interface='Wi-Fi', display=False, max_packets=None, on_new_flow=on_flow_update)
 
 if __name__ == "__main__":
