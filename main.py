@@ -51,6 +51,7 @@ def on_flow_update(flow_key, flow):
     packets_sent = int(flow.get('PacketsSent', 0))
     packets_received = int(flow.get('PacketsReceived', 0))
     duration = float(flow.get('EndTime', 0)) - float(flow.get('StartTime', 0))
+    last_packet_length = int(flow.get('LastPacketLength', 0))
     process_name = get_process_name(src_ip, src_port)
     process_user = get_process_user(src_ip, src_port)
 
@@ -67,6 +68,7 @@ def on_flow_update(flow_key, flow):
             packets_sent,
             packets_received,
             duration,
+            last_packet_length,
             process_name,
             process_user
         ]

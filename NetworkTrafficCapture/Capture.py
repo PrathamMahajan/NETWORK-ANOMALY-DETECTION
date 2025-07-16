@@ -59,6 +59,7 @@ def capture_flows(interface='Wi-Fi', display=True, max_packets=None, on_new_flow
                     flows[flow_key]['BytesSent'] += length
                     flows[flow_key]['PacketsSent'] += 1
                     flows[flow_key]['EndTime'] = now
+                    flows[flow_key]['LastPacketLength'] = length
 
                     # Update reverse flow (received)
                     flows[rev_flow_key]['BytesReceived'] += length
