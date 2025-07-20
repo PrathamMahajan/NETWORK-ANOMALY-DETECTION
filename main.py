@@ -4,8 +4,16 @@ import struct
 import socket
 import psutil
 import requests # type: ignore
+import time
+from collections import defaultdict
+import pandas as pd
+
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from NetworkTrafficCapture.Capture import capture_flows
+
+WINDOW_SIZE = 60  # seconds
+flow_buffer = []
+window_start = time.time()
 
 def ip_to_int(ip):
     try:
@@ -38,6 +46,37 @@ def get_process_user(src_ip, src_port):
     except Exception as e:
         print(f"[ERROR] Getting process user failed: {e}")
     return "Unknown"
+
+#This data is crucial for finding the sudden spike activities
+def aggregate_and_store_window(flows):
+    grouped = defaultdict(list)
+    for flow in flows:
+        key = (flow['src_ip'], flow['dest_ip'], flow['process_name'], flow['process_user'])
+        grouped[key].append(flow)
+    aggregated_data = []
+    for key, group in grouped.items():
+        total_bytes_sent = sum(f['bytes_sent'] for f in group)
+        total_packets_sent = sum(f['packets_sent'] for f in group)
+        total_duration = sum(f['duration'] for f in group)
+        bytes_per_sec = total_bytes_sent / total_duration if total_duration else 0
+        avg_packet_size = total_bytes_sent / total_packets_sent if total_packets_sent else 0
+        unique_dest_ips = len(set(f['dest_ip'] for f in group))
+        session_count = len(group)
+        avg_duration = total_duration / session_count if session_count else 0
+        aggregated_data.append({
+            'src_ip': key[0],
+            'dest_ip': key[1],
+            'process_name': key[2],
+            'process_user': key[3],
+            'bytes_per_sec': bytes_per_sec,
+            'avg_packet_size': avg_packet_size,
+            'unique_dest_ips': unique_dest_ips,
+            'session_count': session_count, #Crucial for finding if any download or incoming network activity is happening from the same IP ( sudden spike in sessions may indicate suspicious activity.)
+            'avg_duration': avg_duration
+        })
+    # Store to CSV
+    df = pd.DataFrame(aggregated_data)
+    df.to_csv('aggregated_flows.csv', mode='a', header=not os.path.exists('aggregated_flows.csv'), index=False)
 
 def on_flow_update(flow_key, flow):
     # Extract values first
@@ -73,6 +112,23 @@ def on_flow_update(flow_key, flow):
             process_user
         ]
         print(f"[REAL-TIME] Features={input_features}")
+
+        # Aggregate per window
+        flow_record = {
+            'src_ip': src_ip,
+            'dest_ip': dest_ip,
+            'process_name': process_name,
+            'process_user': process_user,
+            'bytes_sent': bytes_sent,
+            'packets_sent': packets_sent,
+            'duration': duration
+        }
+        flow_buffer.append(flow_record)
+        global window_start
+        if time.time() - window_start >= WINDOW_SIZE:
+            aggregate_and_store_window(flow_buffer)
+            flow_buffer.clear()
+            window_start = time.time()
 
 def main():
     capture_flows(interface='Wi-Fi', display=False, max_packets=None, on_new_flow=on_flow_update)
