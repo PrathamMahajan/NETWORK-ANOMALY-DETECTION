@@ -71,10 +71,11 @@ def aggregate_and_store_window(flows):
             'bytes_per_sec': bytes_per_sec,
             'avg_packet_size': avg_packet_size,
             'unique_dest_ips': unique_dest_ips,
-            'session_count': session_count, #Crucial for finding if any download or incoming network activity is happening from the same IP ( sudden spike in sessions may indicate suspicious activity.)
-            'avg_duration': avg_duration
+            'session_count': session_count, #Important to find sudden spike in the network traffic
+            'avg_duration': avg_duration,
+            'window_end_time': time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time()))  # Add window timestamp
         })
-    # Store to CSV
+    # Append new records to CSV, retaining history
     df = pd.DataFrame(aggregated_data)
     df.to_csv('aggregated_flows.csv', mode='a', header=not os.path.exists('aggregated_flows.csv'), index=False)
 
