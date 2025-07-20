@@ -3,5 +3,3 @@ venv/
 Model/saved_models
 
 Data/
-
-aggregated_flows.csv
