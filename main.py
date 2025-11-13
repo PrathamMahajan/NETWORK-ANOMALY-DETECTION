@@ -5,15 +5,18 @@ import socket
 import psutil
 import requests # type: ignore
 import time
+import signal
 from collections import defaultdict
 import pandas as pd
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from NetworkTrafficCapture.Capture import capture_flows
 
-WINDOW_SIZE = 60  # seconds
+WINDOW_SIZE = 20  # seconds
 flow_buffer = []
 window_start = time.time()
+header_written = False
+shutdown_requested = False
 
 def ip_to_int(ip):
     try:
@@ -47,12 +50,15 @@ def get_process_user(src_ip, src_port):
         print(f"[ERROR] Getting process user failed: {e}")
     return "Unknown"
 
-#This data is crucial for finding the sudden spike activities
-def aggregate_and_store_window(flows):
+def aggregate_and_store(flows):
+    file_path = 'Data.csv'
+    file_exists = os.path.isfile(file_path)
+
     grouped = defaultdict(list)
     for flow in flows:
         key = (flow['src_ip'], flow['dest_ip'], flow['process_name'], flow['process_user'])
         grouped[key].append(flow)
+
     aggregated_data = []
     for key, group in grouped.items():
         total_bytes_sent = sum(f['bytes_sent'] for f in group)
@@ -63,7 +69,8 @@ def aggregate_and_store_window(flows):
         unique_dest_ips = len(set(f['dest_ip'] for f in group))
         session_count = len(group)
         avg_duration = total_duration / session_count if session_count else 0
-        aggregated_data.append({
+
+        record = {
             'src_ip': key[0],
             'dest_ip': key[1],
             'process_name': key[2],
@@ -71,16 +78,35 @@ def aggregate_and_store_window(flows):
             'bytes_per_sec': bytes_per_sec,
             'avg_packet_size': avg_packet_size,
             'unique_dest_ips': unique_dest_ips,
-            'session_count': session_count, #Important to find sudden spike in the network traffic
+            'session_count': session_count,
             'avg_duration': avg_duration,
-            'window_end_time': time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time()))  # Add window timestamp
-        })
-    # Append new records to CSV, retaining history
-    df = pd.DataFrame(aggregated_data)
-    df.to_csv('aggregated_flows.csv', mode='a', header=not os.path.exists('aggregated_flows.csv'), index=False)
+            'window_end_time': time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time()))
+        }
+
+        aggregated_data.append(record)
+
+    if aggregated_data:
+        try:
+            df = pd.DataFrame(aggregated_data)
+            df.to_csv(file_path, mode='a', header=not file_exists, index=False)
+            print("[INFO] Flushed aggregated flow data to CSV.")
+        except Exception as e:
+            print(f"[ERROR] Failed to write to CSV: {e}")
+
+def graceful_shutdown(signum, frame):
+    global shutdown_requested
+    print("\n[INFO] Graceful shutdown triggered.")
+    shutdown_requested = True
+    if flow_buffer:
+        aggregate_and_store(flow_buffer)
+        flow_buffer.clear()
+    sys.exit(0)
 
 def on_flow_update(flow_key, flow):
-    # Extract values first
+    global window_start, shutdown_requested
+    if shutdown_requested:
+        return
+
     src_ip = flow.get('SourceIP', '0.0.0.0')
     dest_ip = flow.get('DestinationIP', '0.0.0.0')
     src_port = int(flow.get('SourcePort', 0))
@@ -95,7 +121,6 @@ def on_flow_update(flow_key, flow):
     process_name = get_process_name(src_ip, src_port)
     process_user = get_process_user(src_ip, src_port)
 
-    # Only print if process_name is not "Unknown"
     if process_name != "Unknown":
         input_features = [
             src_ip,
@@ -114,7 +139,6 @@ def on_flow_update(flow_key, flow):
         ]
         print(f"[REAL-TIME] Features={input_features}")
 
-        # Aggregate per window
         flow_record = {
             'src_ip': src_ip,
             'dest_ip': dest_ip,
@@ -125,13 +149,16 @@ def on_flow_update(flow_key, flow):
             'duration': duration
         }
         flow_buffer.append(flow_record)
-        global window_start
         if time.time() - window_start >= WINDOW_SIZE:
-            aggregate_and_store_window(flow_buffer)
+            aggregate_and_store(flow_buffer)
             flow_buffer.clear()
             window_start = time.time()
 
 def main():
+    # Register signal handlers for graceful shutdown
+    signal.signal(signal.SIGINT, graceful_shutdown)
+    signal.signal(signal.SIGTERM, graceful_shutdown)
+    print("[INFO] Starting real-time network traffic flow analyzer. Press Ctrl+C to stop.")
     capture_flows(interface='Wi-Fi', display=False, max_packets=None, on_new_flow=on_flow_update)
 
 if __name__ == "__main__":
